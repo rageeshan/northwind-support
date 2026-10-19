@@ -5,11 +5,13 @@ import { Spinner } from '../../components/Spinner';
 import { useReferenceData } from '../../hooks/useReferenceData';
 import type { TicketDetail } from '../../types/api';
 import { CreateTicketForm } from './components/CreateTicketForm';
+import { TriageResultBanner } from './components/TriageResultBanner';
 
 export function CreateTicketPage() {
   const reference = useReferenceData();
   const navigate = useNavigate();
   const [created, setCreated] = useState<TicketDetail>();
+  const [triageDismissed, setTriageDismissed] = useState(false);
 
   return (
     <section>
@@ -29,23 +31,39 @@ export function CreateTicketPage() {
       )}
 
       {created && (
-        <div className="card notice" role="status">
-          <p>
-            Raised <strong>{created.reference}</strong> for {created.customer.name}.
-          </p>
-          <div className="button-row">
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={() => void navigate(`/tickets/${created.id}`)}
-            >
-              Open {created.reference}
-            </button>
-            <button type="button" className="button button--ghost" onClick={() => setCreated(undefined)}>
-              Raise another
-            </button>
+        <>
+          {created.triageResult && !triageDismissed && (
+            <TriageResultBanner
+              result={created.triageResult}
+              onDismiss={() => setTriageDismissed(true)}
+            />
+          )}
+
+          <div className="card notice" role="status">
+            <p>
+              Raised <strong>{created.reference}</strong> for {created.customer.name}.
+            </p>
+            <div className="button-row">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => void navigate(`/tickets/${created.id}`)}
+              >
+                Open {created.reference}
+              </button>
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => {
+                  setCreated(undefined);
+                  setTriageDismissed(false);
+                }}
+              >
+                Raise another
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {reference.data && !created && (
@@ -58,3 +76,4 @@ export function CreateTicketPage() {
     </section>
   );
 }
+

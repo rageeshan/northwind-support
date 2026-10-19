@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SupportDesk.Application.Abstractions;
+using SupportDesk.Application.Services;
 using SupportDesk.Domain.Repositories;
 using SupportDesk.Infrastructure.Data;
 using SupportDesk.Infrastructure.Queries;
@@ -35,13 +36,34 @@ public static class DependencyInjection
         services.AddScoped<IAgentRepository, AgentRepository>();
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
+        services.AddScoped<ITicketEscalationRepository, TicketEscalationRepository>();
 
         services.AddScoped<ITicketQueries, TicketQueries>();
         services.AddScoped<ICustomerQueries, CustomerQueries>();
         services.AddScoped<IAgentQueries, AgentQueries>();
         services.AddScoped<ICategoryQueries, CategoryQueries>();
+        services.AddScoped<IAgentTriageQueries, AgentTriageQueries>();
 
         services.AddScoped<SupportDbSeeder>();
+
+        // Bind the SLA options from configuration (BR-6: all window values come from config).
+        services.AddScoped<SlaOptions>(_ =>
+        {
+            var section = configuration.GetSection(SlaOptions.Section);
+            var windows = new Dictionary<string, double>();
+            foreach (var child in section.GetSection("BaseWindowHours").GetChildren())
+            {
+                if (double.TryParse(child.Value, out var h))
+                    windows[child.Key] = h;
+            }
+            return new SlaOptions
+            {
+                BaseWindowHours = windows,
+                PremiumCustomerMultiplier = double.TryParse(section["PremiumCustomerMultiplier"], out var m) ? m : 0.5,
+                MinimumWindowHours = double.TryParse(section["MinimumWindowHours"], out var min) ? min : 1,
+                AtRiskThresholdPercent = double.TryParse(section["AtRiskThresholdPercent"], out var t) ? t : 25
+            };
+        });
 
         return services;
     }

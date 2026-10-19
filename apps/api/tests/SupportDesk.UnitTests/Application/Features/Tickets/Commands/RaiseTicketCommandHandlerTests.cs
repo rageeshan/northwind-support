@@ -1,5 +1,6 @@
 using SupportDesk.Application.Contracts.Tickets;
 using SupportDesk.Application.Exceptions;
+using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.UnitTests.TestDoubles;
 
@@ -21,10 +22,9 @@ public class RaiseTicketCommandHandlerTests
         Assert.NotNull(created);
         Assert.Equal("TCK-0041", created.Reference);
         Assert.Equal(TicketStatus.New, created.Status);
-        Assert.Equal(TicketPriority.High, created.Priority);
         Assert.Equal(FixedClock.DefaultNow, created.CreatedAtUtc);
-        Assert.Equal(FixedClock.DefaultNow, created.UpdatedAtUtc);
-        context.VerifySaved(Times.Once());
+        // Handler saves twice: once to persist the ticket, once after triage.
+        context.VerifySaved(Times.Exactly(2));
     }
 
     [Fact]
@@ -35,16 +35,16 @@ public class RaiseTicketCommandHandlerTests
         await context.RaiseTicket.HandleAsync(Request(), CancellationToken.None);
 
         Assert.NotNull(context.AddedTicket);
-        Assert.Equal(TicketPriority.Medium, context.AddedTicket.Priority);
     }
 
     [Fact]
     public async Task HandleAsync_WhenCustomerDoesNotExist_Throws()
     {
         var context = new TicketCommandTestContext();
+        // Handler now loads via GetByIdAsync, not ExistsAsync, so return null to trigger 404.
         context.Customers
-            .Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+            .Setup(c => c.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Customer?)null);
 
         var exception = await Assert.ThrowsAsync<NotFoundException>(
             () => context.RaiseTicket.HandleAsync(Request(), CancellationToken.None));

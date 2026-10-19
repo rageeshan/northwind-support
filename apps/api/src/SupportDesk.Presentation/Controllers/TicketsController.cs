@@ -3,9 +3,12 @@ using SupportDesk.Application.Contracts.Common;
 using SupportDesk.Application.Contracts.Tickets;
 using SupportDesk.Application.Features.Tickets.Commands.AssignTicket;
 using SupportDesk.Application.Features.Tickets.Commands.ChangeTicketStatus;
+using SupportDesk.Application.Features.Tickets.Commands.EscalateTicket;
 using SupportDesk.Application.Features.Tickets.Commands.RaiseTicket;
 using SupportDesk.Application.Features.Tickets.Queries.GetTicket;
 using SupportDesk.Application.Features.Tickets.Queries.SearchTickets;
+using SupportDesk.Application.Abstractions;
+using SupportDesk.Application.Exceptions;
 
 namespace SupportDesk.Presentation.Controllers;
 
@@ -27,7 +30,7 @@ public sealed class TicketsController : ControllerBase
     public Task<TicketDetailDto> Get(int id, [FromServices] GetTicketQueryHandler handler, CancellationToken ct) =>
         handler.HandleAsync(id, ct);
 
-    /// <summary>Raises a new ticket.</summary>
+    /// <summary>Raises a new ticket (includes automatic triage).</summary>
     [HttpPost]
     public async Task<ActionResult<TicketDetailDto>> Create(
         CreateTicketRequest request,
@@ -56,4 +59,34 @@ public sealed class TicketsController : ControllerBase
         [FromServices] AssignTicketCommandHandler handler,
         CancellationToken ct) =>
         handler.HandleAsync(id, request, ct);
+
+    /// <summary>
+    /// Escalates a ticket one priority level. Returns 409 when the ticket is already Critical,
+    /// Resolved, or Closed.
+    /// </summary>
+    [HttpPost("{id:int}/escalate")]
+    public Task<TicketDetailDto> Escalate(
+        int id,
+        EscalateTicketRequest request,
+        [FromServices] EscalateTicketCommandHandler handler,
+        CancellationToken ct) =>
+        handler.HandleAsync(id, request, ct);
+
+    /// <summary>Returns the escalation history for a ticket, newest first.</summary>
+    [HttpGet("{id:int}/escalations")]
+    public async Task<ActionResult<IReadOnlyList<EscalationDto>>> GetEscalations(
+        int id,
+        [FromServices] ITicketQueries queries,
+        CancellationToken ct)
+    {
+        // Ensure the ticket exists before returning the (possibly empty) history list.
+        var ticket = await queries.GetDetailAsync(id, ct);
+        if (ticket is null)
+        {
+            return NotFound();
+        }
+
+        var escalations = await queries.GetEscalationsAsync(id, ct);
+        return Ok(escalations);
+    }
 }

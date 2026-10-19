@@ -1,11 +1,14 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using SupportDesk.Application.Abstractions;
 using SupportDesk.Application.Contracts.Tickets;
 using SupportDesk.Application.Features.Tickets.Commands.AssignTicket;
 using SupportDesk.Application.Features.Tickets.Commands.ChangeTicketStatus;
 using SupportDesk.Application.Features.Tickets.Commands.RaiseTicket;
 using SupportDesk.Application.Features.Tickets.Queries.GetTicket;
+using SupportDesk.Application.Services;
 using SupportDesk.Domain.Aggregates.Agents;
+using SupportDesk.Domain.Aggregates.Categories;
 using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Domain.Repositories;
@@ -24,8 +27,26 @@ internal sealed class TicketCommandTestContext
         Customers.Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
+        // Return a standard-tier customer so triage gets a real Customer to check the tier.
+        var customer = (Customer)Activator.CreateInstance(typeof(Customer), nonPublic: true)!;
+        typeof(Customer).GetProperty(nameof(Customer.Id))!.SetValue(customer, 1);
+        typeof(Customer).GetProperty(nameof(Customer.Name))!.SetValue(customer, "Contoso Ltd");
+        typeof(Customer).GetProperty(nameof(Customer.Tier))!.SetValue(customer, CustomerTier.Standard);
+        Customers.Setup(c => c.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
+
         Categories.Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+
+        // Return a plain category that doesn't force Critical and doesn't require a specialist.
+        var category = (Category)Activator.CreateInstance(typeof(Category), nonPublic: true)!;
+        typeof(Category).GetProperty(nameof(Category.Id))!.SetValue(category, 1);
+        typeof(Category).GetProperty(nameof(Category.Name))!.SetValue(category, "General");
+        typeof(Category).GetProperty(nameof(Category.ForcesCriticalPriority))!.SetValue(category, false);
+        typeof(Category).GetProperty(nameof(Category.RequiresSpecialist))!.SetValue(category, false);
+        typeof(Category).GetProperty(nameof(Category.IsActive))!.SetValue(category, true);
+        Categories.Setup(c => c.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(category);
 
         Tickets.Setup(t => t.NextReferenceAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync("TCK-0041");
@@ -33,6 +54,10 @@ internal sealed class TicketCommandTestContext
         Tickets.Setup(t => t.AddAsync(It.IsAny<Ticket>(), It.IsAny<CancellationToken>()))
             .Callback<Ticket, CancellationToken>((ticket, _) => AddedTicket = ticket)
             .Returns(Task.CompletedTask);
+
+        // No agents available for triage (simplest setup — ticket will be unassigned).
+        AgentTriageQueries.Setup(q => q.GetCandidatesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
 
         // Every command returns the ticket as re-read once its change has been saved.
         TicketQueries.Setup(q => q.GetDetailAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -44,10 +69,23 @@ internal sealed class TicketCommandTestContext
                 Category = new CategoryDto(1, "General", false)
             });
 
+        var slaOptions = new SlaOptions
+        {
+            BaseWindowHours = new Dictionary<string, double>
+            {
+                ["Critical"] = 4, ["High"] = 8, ["Medium"] = 24, ["Low"] = 72
+            },
+            PremiumCustomerMultiplier = 0.5,
+            MinimumWindowHours = 1,
+            AtRiskThresholdPercent = 25
+        };
+        var triageService = new TriageService(slaOptions);
+
         var getTicket = new GetTicketQueryHandler(TicketQueries.Object);
 
         RaiseTicket = new RaiseTicketCommandHandler(
-            Tickets.Object, Customers.Object, Categories.Object, UnitOfWork.Object, Clock, getTicket,
+            Tickets.Object, Customers.Object, Categories.Object, AgentTriageQueries.Object,
+            UnitOfWork.Object, Clock, triageService, getTicket,
             NullLogger<RaiseTicketCommandHandler>.Instance);
 
         ChangeTicketStatus = new ChangeTicketStatusCommandHandler(Tickets.Object, UnitOfWork.Object, Clock, getTicket);
@@ -64,6 +102,8 @@ internal sealed class TicketCommandTestContext
     public Mock<ICategoryRepository> Categories { get; } = new();
 
     public Mock<IAgentRepository> Agents { get; } = new();
+
+    public Mock<IAgentTriageQueries> AgentTriageQueries { get; } = new();
 
     public Mock<IUnitOfWork> UnitOfWork { get; } = new();
 

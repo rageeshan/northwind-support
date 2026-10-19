@@ -34,7 +34,8 @@ public sealed class TicketQueriesFilteringTests : IAsyncLifetime
             .Options;
 
         _db = new SupportDbContext(options);
-        _sut = new TicketQueries(_db, new FixedClock());
+        _sut = new TicketQueries(_db, new FixedClock(), new SupportDesk.Application.Services.SlaOptions());
+
     }
 
     public async Task InitializeAsync()

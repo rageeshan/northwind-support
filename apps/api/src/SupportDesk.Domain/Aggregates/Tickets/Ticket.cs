@@ -45,6 +45,13 @@ public sealed class Ticket : AggregateRoot
 
     public DateTime? ResolvedAtUtc { get; private set; }
 
+    /// <summary>
+    /// The start of the current SLA window. Set to <see cref="CreatedAtUtc"/> during initial
+    /// triage and reset to the escalation timestamp after each escalation, so the AtRisk
+    /// threshold can be computed correctly even after re-triage.
+    /// </summary>
+    public DateTime? SlaPeriodStartUtc { get; private set; }
+
     /// <summary>True while the ticket still needs work from an agent.</summary>
     public bool IsOpen => Status is not (TicketStatus.Resolved or TicketStatus.Closed);
 
@@ -111,4 +118,72 @@ public sealed class Ticket : AggregateRoot
         AssignedAgentId = agentId;
         UpdatedAtUtc = nowUtc;
     }
+
+    /// <summary>
+    /// Applies the triage decision: sets the resolved priority, due date, SLA window start and
+    /// initial agent assignment. Called once immediately after the ticket is persisted.
+    /// </summary>
+    public void Triage(
+        TicketPriority decidedPriority,
+        int? agentId,
+        DateTime? dueAtUtc,
+        DateTime nowUtc)
+    {
+        Priority = decidedPriority;
+        AssignedAgentId = agentId;
+        DueAtUtc = dueAtUtc;
+        SlaPeriodStartUtc = dueAtUtc is not null ? nowUtc : null;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Escalates the ticket: raises its priority by one level, recomputes the due date from
+    /// <paramref name="nowUtc"/>, and optionally reassigns it.
+    /// </summary>
+    /// <returns>The snapshot that the escalation history row needs.</returns>
+    /// <exception cref="BusinessRuleViolationException">
+    /// The ticket is already Critical, or it is Resolved or Closed.
+    /// </exception>
+    public EscalationSnapshot Escalate(
+        int? newAgentId,
+        DateTime? newDueAtUtc,
+        DateTime nowUtc)
+    {
+        if (Priority == TicketPriority.Critical)
+        {
+            throw new BusinessRuleViolationException(
+                $"Ticket {Reference} is already Critical and cannot be escalated further.");
+        }
+
+        if (!IsOpen)
+        {
+            throw new BusinessRuleViolationException(
+                $"Ticket {Reference} is {Status} and cannot be escalated.");
+        }
+
+        var snapshot = new EscalationSnapshot(
+            FromPriority: Priority,
+            ToPriority: Priority + 1,
+            FromAgentId: AssignedAgentId,
+            ToAgentId: newAgentId,
+            FromDueAtUtc: DueAtUtc,
+            ToDueAtUtc: newDueAtUtc);
+
+        Priority = snapshot.ToPriority;
+        AssignedAgentId = newAgentId;
+        DueAtUtc = newDueAtUtc;
+        SlaPeriodStartUtc = newDueAtUtc is not null ? nowUtc : null;
+        UpdatedAtUtc = nowUtc;
+
+        return snapshot;
+    }
 }
+
+/// <summary>The before/after values captured at the moment of an escalation.</summary>
+public sealed record EscalationSnapshot(
+    TicketPriority FromPriority,
+    TicketPriority ToPriority,
+    int? FromAgentId,
+    int? ToAgentId,
+    DateTime? FromDueAtUtc,
+    DateTime? ToDueAtUtc);
