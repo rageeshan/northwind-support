@@ -76,6 +76,36 @@ a {
   font-weight: 600;
 }
 
+.app__session {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app__agent {
+  font-size: 0.9rem;
+  color: var(--colour-muted);
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-page__card {
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-page__lead {
+  margin: 8px 0 20px;
+  color: var(--colour-muted);
+}
+
 .app__main {
   max-width: 1200px;
   margin: 0 auto;

@@ -16,8 +16,8 @@ public sealed record UpdateTicketStatusRequest(TicketStatus Status);
 /// <summary>Body of PATCH /api/tickets/{id}/assignment. A null agent unassigns the ticket.</summary>
 public sealed record AssignTicketRequest(int? AgentId);
 
-/// <summary>Body of POST /api/tickets/{id}/escalate.</summary>
-public sealed record EscalateTicketRequest(string Reason, string EscalatedBy);
+/// <summary>Body of POST /api/tickets/{id}/escalate. The actor comes from the JWT, not this body.</summary>
+public sealed record EscalateTicketRequest(string Reason);
 
 /// <summary>
 /// The outcome of triage: what priority was assigned, the SLA window, and why each

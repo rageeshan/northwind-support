@@ -17,13 +17,24 @@ namespace SupportDesk.Infrastructure.Data;
 /// Every aggregate is built through its own behaviour. The two historical values no behaviour
 /// produces - a ticket's last update and its due date - are set through EF Core directly.
 /// </remarks>
-public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<SupportDbSeeder> logger)
+public sealed class SupportDbSeeder(
+    SupportDbContext db,
+    IClock clock,
+    IPasswordHasher passwordHasher,
+    ILogger<SupportDbSeeder> logger)
 {
+    /// <summary>
+    /// Local-only fixture password for every seeded agent. Obviously not a real secret.
+    /// Documented in README.md.
+    /// </summary>
+    public const string DevelopmentPassword = "Local_Dev_Password1!";
+
     /// <summary>Seeds the database, unless it already has tickets in it.</summary>
     public async Task SeedAsync(CancellationToken ct = default)
     {
         if (await db.Set<Ticket>().AnyAsync(ct))
         {
+            await EnsureAgentPasswordsAsync(ct);
             logger.LogInformation("Seed data already present; skipping.");
             return;
         }
@@ -33,6 +44,7 @@ public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<S
         var categories = SeedCategories();
         var customers = SeedCustomers(now);
         var agents = SeedAgents(now);
+        ApplyDevelopmentPasswords(agents);
 
         db.AddRange(categories);
         db.AddRange(customers);
@@ -68,6 +80,35 @@ public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<S
         new("Tailspin Toys", "service@tailspin.example", "+353 1 555 0105", CustomerTier.Standard, now.AddDays(-180)),
         new("Wide World Importers", "support@wideworld.example", "+65 6555 0106", CustomerTier.Premium, now.AddDays(-90))
     ];
+
+    private void ApplyDevelopmentPasswords(IEnumerable<Agent> agents)
+    {
+        foreach (var agent in agents)
+        {
+            agent.SetPasswordHash(passwordHasher.Hash(DevelopmentPassword));
+        }
+    }
+
+    /// <summary>
+    /// Agents created before Task 3 have an empty hash after the migration's default.
+    /// Hash them so an existing local database still lets agents sign in.
+    /// </summary>
+    private async Task EnsureAgentPasswordsAsync(CancellationToken ct)
+    {
+        var missing = await db.Set<Agent>()
+            .Where(a => a.PasswordHash == "")
+            .ToListAsync(ct);
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        ApplyDevelopmentPasswords(missing);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Backfilled development password hashes for {Count} agents.", missing.Count);
+    }
 
     private static List<Agent> SeedAgents(DateTime now)
     {

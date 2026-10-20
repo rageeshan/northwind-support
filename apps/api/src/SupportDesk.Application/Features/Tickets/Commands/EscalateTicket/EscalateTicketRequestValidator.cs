@@ -12,10 +12,5 @@ public sealed class EscalateTicketRequestValidator : AbstractValidator<EscalateT
             .MinimumLength(5)
             .MaximumLength(500)
             .WithMessage("Escalation reason must be between 5 and 500 characters.");
-
-        RuleFor(x => x.EscalatedBy)
-            .NotEmpty()
-            .MaximumLength(200)
-            .WithMessage("EscalatedBy must not be empty and must be at most 200 characters.");
     }
 }

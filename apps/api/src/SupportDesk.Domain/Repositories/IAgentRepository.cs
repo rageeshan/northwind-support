@@ -8,4 +8,7 @@ namespace SupportDesk.Domain.Repositories;
 public interface IAgentRepository
 {
     Task<Agent?> GetByIdAsync(int id, CancellationToken ct);
+
+    /// <summary>Looks up an agent by email, ignoring case and surrounding whitespace.</summary>
+    Task<Agent?> GetByEmailAsync(string email, CancellationToken ct);
 }

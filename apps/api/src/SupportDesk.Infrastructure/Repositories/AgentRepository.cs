@@ -12,4 +12,12 @@ public sealed class AgentRepository(SupportDbContext db) : IAgentRepository
         db.Set<Agent>()
             .Include(a => a.Specializations)
             .FirstOrDefaultAsync(a => a.Id == id, ct);
+
+    public Task<Agent?> GetByEmailAsync(string email, CancellationToken ct)
+    {
+        var normalized = email.Trim().ToLower();
+
+        return db.Set<Agent>()
+            .FirstOrDefaultAsync(a => a.Email.ToLower() == normalized, ct);
+    }
 }

@@ -1,14 +1,7 @@
 import { useState } from 'react';
-import { ApiError, toErrorMessage } from '../../../api/client';
+import { toErrorMessage } from '../../../api/client';
 import { ticketsApi } from '../../../api/tickets';
 import type { EscalateTicketPayload, TicketDetail, TicketPriority } from '../../../types/api';
-
-const priorityOrder: Record<TicketPriority, number> = {
-  Low: 1,
-  Medium: 2,
-  High: 3,
-  Critical: 4,
-};
 
 const nextPriority: Partial<Record<TicketPriority, TicketPriority>> = {
   Low: 'Medium',
@@ -27,7 +20,6 @@ interface EscalatePanelProps {
  */
 export function EscalatePanel({ ticket, onUpdated }: EscalatePanelProps) {
   const [reason, setReason] = useState('');
-  const [escalatedBy, setEscalatedBy] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<string>();
@@ -46,21 +38,15 @@ export function EscalatePanel({ ticket, onUpdated }: EscalatePanelProps) {
       setError('Reason must be at least 5 characters.');
       return;
     }
-    if (!escalatedBy.trim()) {
-      setError('Please enter your name.');
-      return;
-    }
 
     setIsSubmitting(true);
     try {
       const payload: EscalateTicketPayload = {
         reason: reason.trim(),
-        escalatedBy: escalatedBy.trim(),
       };
       const updated = await ticketsApi.escalate(ticket.id, payload);
       setSuccess(`Escalated to ${updated.priority}.`);
       setReason('');
-      setEscalatedBy('');
       onUpdated(updated);
     } catch (caught) {
       setError(toErrorMessage(caught, 'Could not escalate the ticket.'));
@@ -100,20 +86,6 @@ export function EscalatePanel({ ticket, onUpdated }: EscalatePanelProps) {
                 value={reason}
                 maxLength={500}
                 onChange={(e) => setReason(e.target.value)}
-              />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="escalate-by">
-                Your name <span className="field__required">*</span>
-              </label>
-              <input
-                id="escalate-by"
-                type="text"
-                placeholder="e.g. Alex Turner"
-                value={escalatedBy}
-                maxLength={200}
-                onChange={(e) => setEscalatedBy(e.target.value)}
               />
             </div>
 

@@ -1,3 +1,4 @@
+import { clearSession, getAccessToken, redirectToLogin } from '../auth/session';
 import type { ProblemDetails } from '../types/api';
 
 /**
@@ -28,17 +29,32 @@ export class ApiError extends Error {
 /**
  * The single place that talks to the API. Returns parsed JSON, or throws an
  * {@link ApiError} that callers can show to the user.
+ *
+ * Attaches the JWT from sessionStorage on every call. A 401 (except login itself)
+ * clears the session and sends the browser to /login.
  */
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   if (!response.ok) {
+    if (response.status === 401 && path !== '/auth/login') {
+      clearSession();
+      redirectToLogin();
+    }
+
     const problem = await readProblem(response);
 
     throw new ApiError(

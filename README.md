@@ -87,16 +87,72 @@ Both pass on a clean checkout and neither needs a database.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /api/tickets` | Paged list with `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `sortBy`, `sortDirection`. **Filters are accepted but not applied yet** (Task 1). |
+| `POST /api/auth/login` | Sign in with email and password. Returns a JWT. Open without a token. |
+| `GET /api/auth/me` | The signed-in agent, or 401. |
+| `GET /api/tickets` | Paged list with `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `slaStatus`, `sortBy`, `sortDirection`. Requires a token. |
 | `GET /api/tickets/{id}` | One ticket |
 | `POST /api/tickets` | Create a ticket |
 | `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
+| `POST /api/tickets/{id}/escalate` | Escalate one priority level. Actor is taken from the JWT, not the body. |
 | `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
+
+Every endpoint except `POST /api/auth/login` (and Swagger in Development) requires `Authorization: Bearer <token>`.
+
+### Development login (Task 3)
+
+Password for every **active** seeded agent: **`Local_Dev_Password1!`** (a local fixture, hashed at seed time).
+
+| Agent | Email | Can sign in |
+| --- | --- | --- |
+| Alex Turner | alex.turner@northwind-support.example | Yes |
+| Ben Osei | ben.osei@northwind-support.example | Yes |
+| Priya Nair | priya.nair@northwind-support.example | Yes |
+| Sara Lindqvist | sara.lindqvist@northwind-support.example | Yes |
+| Marcus Doyle | marcus.doyle@northwind-support.example | Yes |
+| Yuki Tanaka | yuki.tanaka@northwind-support.example | No (inactive; same 401 as a wrong password) |
 
 Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict or business rule.
 
 **Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
 and 40 tickets across every status, priority and SLA state.
+
+## Authentication (Task 3)
+
+Agents sign in with email and password. There is no registration, password reset, refresh token or role model.
+
+**Credential storage.** A `PasswordHash` column on `Agents` (migration `Task3_AddAgentCredentials`). Login is agent-only and email is already unique, so a separate Users table would be a 1:1 join with no extra behaviour. Rejected: storing the password in a Users table “for later customer login” — that is out of scope.
+
+**Hashing.** ASP.NET Identity `PasswordHasher<object>` (PBKDF2, salted, iterated). Never plain text. Hashes are produced at seed time, not checked in. Empty hashes left by the migration default on an existing local database are backfilled on startup.
+
+**Tokens.** HMAC-SHA256 JWT. Signing key from `Jwt:SigningKey` / `Jwt__SigningKey` (listed in `.env.example`). Not a literal in code. Issuer `northwind-support`, audience `northwind-support-web`. **Lifetime is 8 hours (480 minutes)** — one support shift — via `Jwt:LifetimeMinutes`.
+
+**Authorization.** A fallback policy requires an authenticated user on every endpoint. `POST /api/auth/login` is `[AllowAnonymous]`. Swagger UI is middleware, so it stays open. `escalatedBy` is the signed-in agent's name from the token.
+
+**Browser storage.** The JWT is kept in `sessionStorage` under `northwind.auth` and attached by `apps/web/src/api/client.ts`. Trade-off: it survives a refresh and is cleared when the tab closes, which matches a desk session, but any XSS on the origin can read it while the tab is open. An httpOnly cookie would resist XSS and introduce CSRF; that is a production change, not this task.
+
+**Production changes that this assignment does not make:** a real secret in a vault or environment, HTTPS-only cookies or a BFF, refresh tokens, lockout, and rotating the signing key.
+
+## Design decisions (Task 3)
+
+- **Column on Agent, not a Users table.** See above. Chosen because the only principals are agents and email is already a unique login identifier.
+- **Identity PasswordHasher over BCrypt.** First-party, no extra native dependency, already the assignment's example of a vetted mechanism.
+- **Same 401 for wrong email, wrong password, and inactive agents.** The spec requires identical failures for unknown email vs wrong password. Inactive is included so a disabled account cannot be probed.
+- **sessionStorage over localStorage or memory.** Refresh should not bounce an agent to login; closing the tab should. Documented as a XSS trade-off.
+- **Fallback authorization policy** rather than `[Authorize]` on every controller, so a new endpoint cannot be left open by accident.
+
+## Known limitations (Task 3)
+
+No registration, password reset, email verification, OAuth/SSO, refresh tokens, MFA, lockout, rate limiting, or roles. Tokens last 8 hours with no silent renew — an expired token is a 401 and a trip back to `/login`. The JWT lives in sessionStorage (XSS-readable). HTTPS certificates are the ASP.NET development cert only.
+
+## Testing (Task 3)
+
+```bash
+npm test
+```
+
+Covered: wrong password and unknown email share the same 401 and issue no token; inactive agents cannot log in; a successful login returns a token and the agent to greet; password verification passes and fails correctly; the web client attaches the Bearer token and treats a 401 as a cleared session plus redirect; unauthenticated visitors are sent to `/login`; the login form does not call the API when empty and shows the server message on rejected credentials.
+
+Not tested here: token lifetime clock, Swagger's Authorize button, browser cookie behaviour.
 
 ## Troubleshooting
 

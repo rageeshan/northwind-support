@@ -22,6 +22,7 @@ public sealed class EscalateTicketCommandHandler(
     IAgentTriageQueries agentTriageQueries,
     IUnitOfWork unitOfWork,
     IClock clock,
+    ICurrentUser currentUser,
     TriageService triageService,
     GetTicketQueryHandler getTicket,
     ILogger<EscalateTicketCommandHandler> logger)
@@ -67,7 +68,7 @@ public sealed class EscalateTicketCommandHandler(
             fromDueAtUtc: snapshot.FromDueAtUtc,
             toDueAtUtc: snapshot.ToDueAtUtc,
             reason: request.Reason,
-            escalatedBy: request.EscalatedBy,
+            escalatedBy: currentUser.FullName,
             escalatedAtUtc: now);
 
         await escalations.AddAsync(escalation, ct);
@@ -75,7 +76,7 @@ public sealed class EscalateTicketCommandHandler(
 
         logger.LogInformation(
             "Ticket {Reference} escalated from {From} to {To} by {Who}.",
-            ticket.Reference, snapshot.FromPriority, snapshot.ToPriority, request.EscalatedBy);
+            ticket.Reference, snapshot.FromPriority, snapshot.ToPriority, currentUser.FullName);
 
         return await getTicket.HandleAsync(ticket.Id, ct);
     }

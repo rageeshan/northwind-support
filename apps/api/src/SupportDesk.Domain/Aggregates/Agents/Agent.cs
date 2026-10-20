@@ -39,8 +39,21 @@ public sealed class Agent : AggregateRoot
 
     public DateTime CreatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Salted hash of the agent's password (Identity <c>PasswordHasher</c> format).
+    /// Never expose this on a DTO or in logs.
+    /// </summary>
+    public string PasswordHash { get; private set; } = string.Empty;
+
     /// <summary>The ticket categories this agent is qualified for.</summary>
     public IReadOnlyCollection<AgentSpecialization> Specializations => _specializations;
+
+    /// <summary>Stores a already-hashed password. The hash is produced outside the domain.</summary>
+    public void SetPasswordHash(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+        PasswordHash = passwordHash;
+    }
 
     /// <summary>Records that the agent is qualified for a category. Adding one twice is a no-op.</summary>
     public void AddSpecialization(int categoryId)

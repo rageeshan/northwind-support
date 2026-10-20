@@ -91,7 +91,23 @@ export interface CreateTicketPayload {
 
 export interface EscalateTicketPayload {
   reason: string;
-  escalatedBy: string;
+}
+
+export interface AuthUser {
+  id: number;
+  fullName: string;
+  email: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  accessToken: string;
+  expiresAtUtc: string;
+  user: AuthUser;
 }
 
 /** Triage decision returned alongside the created ticket. */
