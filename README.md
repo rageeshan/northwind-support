@@ -78,7 +78,8 @@ Both pass on a clean checkout and neither needs a database.
 | Command | What it does |
 | --- | --- |
 | `npm run db:up` / `db:down` / `db:reset` | Start / stop / wipe SQL Server |
-| `npm run api` / `npm run web` | Run the API / the React app |
+| `docker compose up -d --build` | Build and run SQL Server + API container stack |
+| `npm run api` / `npm run web` | Run the API / the React app locally |
 | `npm run build` | Build both |
 | `npm run lint` / `typecheck` / `format` | Web lint and types / `dotnet format` |
 | `npm run ef -- migrations add <Name>` | Add an EF Core migration |
@@ -94,9 +95,10 @@ Both pass on a clean checkout and neither needs a database.
 | `POST /api/tickets` | Create a ticket |
 | `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
 | `POST /api/tickets/{id}/escalate` | Escalate one priority level. Actor is taken from the JWT, not the body. |
+| `GET /health` | Database health check endpoint (DK-7). Open without a token. |
 | `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
 
-Every endpoint except `POST /api/auth/login` (and Swagger in Development) requires `Authorization: Bearer <token>`.
+Every endpoint except `POST /api/auth/login` and `GET /health` (and Swagger in Development) requires `Authorization: Bearer <token>`.
 
 ### Development login (Task 3)
 
@@ -153,6 +155,78 @@ npm test
 Covered: wrong password and unknown email share the same 401 and issue no token; inactive agents cannot log in; a successful login returns a token and the agent to greet; password verification passes and fails correctly; the web client attaches the Bearer token and treats a 401 as a cleared session plus redirect; unauthenticated visitors are sent to `/login`; the login form does not call the API when empty and shows the server message on rejected credentials.
 
 Not tested here: token lifetime clock, Swagger's Authorize button, browser cookie behaviour.
+
+## Docker (Task 4)
+
+The API is packaged as a lightweight, production-ready container image (`apps/api/Dockerfile`) with no secrets baked in.
+
+### Multi-stage build & layer caching (DK-1, DK-2)
+- **Multi-stage:** Compiles with `mcr.microsoft.com/dotnet/sdk:10.0` and runs on the lean `mcr.microsoft.com/dotnet/aspnet:10.0` runtime image (~348 MB vs >1 GB for the SDK).
+- **Restore caching:** `global.json`, `Directory.Build.props`, `Directory.Packages.props`, and all 4 `.csproj` files are copied first to run `dotnet restore`. Source code is copied afterwards, so changing `.cs` files reuses the cached restore layer (`CACHED`).
+- **Build context exclusion:** `.dockerignore` excludes `apps/web/`, `apps/api/tests/`, `bin/`, `obj/`, `node_modules/`, `.git/`, and `.env` to keep the context minimal and fast.
+
+### Non-root container & Security (DK-3, DK-4)
+- **Non-root user:** The container switches to `USER app` (the standard unprivileged user in official .NET images, UID 1654). Executing `docker compose exec api whoami` returns `app`, not `root`.
+- **Port:** The container listens on internal port `8080` (`ASPNETCORE_HTTP_PORTS=8080`).
+- **No baked-in secrets:** All credentials and settings (database connection string, JWT signing key, issuer, audience, lifetime, and environment) are injected at runtime via environment variables in `docker-compose.yml` and `.env.example`.
+
+### Compose service & orchestration (DK-5, DK-6)
+- The `api` service in `docker-compose.yml` is published on **`localhost:5080`** (`5080:8080`).
+- It connects to SQL Server via its Docker service name `sqlserver` on port 1433 (`Server=sqlserver,1433`).
+- Service ordering is guaranteed via `depends_on` with `condition: service_healthy` so the API container only starts after SQL Server passes its health check.
+- When started against an empty volume, the API automatically applies migrations and seeds initial demo data on startup in Development.
+
+### Database health check (DK-7)
+- `GET /health` runs `DatabaseHealthCheck` (`Microsoft.Extensions.Diagnostics.HealthChecks`) testing `db.Database.CanConnectAsync()`.
+- Returns `200 OK Healthy` when SQL Server is reachable.
+- Configured centrally with `.AllowAnonymous()` so monitoring and container orchestrators can check health without a token.
+
+### Running web app with containerized API (DK-8)
+To run the React web frontend against the containerized API:
+```bash
+VITE_API_PROXY_TARGET=http://localhost:5080 npm run web
+```
+The Vite dev server proxies `/api` requests to `http://localhost:5080`.
+
+### Production migrations: why not in the container? (DK-6)
+In local development, running `Database.Migrate()` on application startup is convenient. However, in a real production deployment:
+1. **Concurrency and race conditions:** In horizontally-scaled environments with multiple API replicas (e.g. Kubernetes pods or ECS tasks), multiple instances starting up simultaneously would race to apply schema migrations, leading to database lock contention, deadlocks, or partial failures.
+2. **Principle of least privilege:** The API application runtime credentials should only have DML permissions (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). Applying migrations requires elevated DDL permissions (`CREATE TABLE`, `ALTER TABLE`, `DROP`, index creation).
+3. **Rollback and audit control:** Production database migrations should be version-controlled, reviewed by DBAs, and executed ahead of application deployments via idempotent migration scripts (`dotnet ef migrations script --idempotent`) executed in a deployment pipeline or a dedicated Kubernetes init job/pre-deploy hook.
+
+### How to verify Task 4
+1. **Fresh start & migration:**
+   ```bash
+   docker compose down -v && docker compose up -d --build
+   ```
+2. **Verify health endpoint:**
+   ```bash
+   curl -i http://localhost:5080/health
+   # Returns HTTP 200 OK and "Healthy"
+   ```
+3. **Verify non-root user:**
+   ```bash
+   docker compose exec api whoami
+   # Prints: app
+   ```
+4. **Verify cached restore:**
+   Touch or change any `.cs` file and run `docker compose build api`. Step `RUN dotnet restore` will show as `CACHED` and the build completes in under a second.
+5. **Image size comparison:**
+   ```bash
+   docker image ls
+   ```
+   The runtime image `northwind-support-api` is ~348 MB (compared to >1 GB for the .NET SDK image).
+6. **Query data via API:**
+   ```bash
+   # Login to get JWT
+   TOKEN=$(curl -s -X POST http://localhost:5080/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"alex.turner@northwind-support.example","password":"Local_Dev_Password1!"}' \
+     | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)
+
+   # Fetch seeded tickets
+   curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:5080/api/tickets?pageSize=2"
+   ```
 
 ## Troubleshooting
 

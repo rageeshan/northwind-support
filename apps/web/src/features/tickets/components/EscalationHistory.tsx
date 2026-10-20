@@ -15,16 +15,36 @@ export function EscalationHistory({ ticketId, refreshKey }: EscalationHistoryPro
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>();
 
-  useEffect(() => {
+  const [prevKey, setPrevKey] = useState({ ticketId, refreshKey });
+  if (prevKey.ticketId !== ticketId || prevKey.refreshKey !== refreshKey) {
+    setPrevKey({ ticketId, refreshKey });
     setIsLoading(true);
+  }
+
+  useEffect(() => {
+    let ignore = false;
     ticketsApi
       .getEscalations(ticketId)
       .then((data) => {
-        setRows(data);
-        setError(undefined);
+        if (!ignore) {
+          setRows(data);
+          setError(undefined);
+        }
       })
-      .catch(() => setError('Could not load escalation history.'))
-      .finally(() => setIsLoading(false));
+      .catch(() => {
+        if (!ignore) {
+          setError('Could not load escalation history.');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [ticketId, refreshKey]);
 
   if (isLoading) {

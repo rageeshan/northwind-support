@@ -2,9 +2,13 @@
 .github
 node_modules
 **/node_modules
-**/bin
-**/obj
+bin/
+**/bin/
+obj/
+**/obj/
 .env
 **/.env
+apps/web
+apps/api/tests
 .vs
 .vscode
